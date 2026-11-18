@@ -1,3 +1,17 @@
+# CSAISR 普通平均与方向差分实验
+
+本次已将KVCA的SAT相似度加权平均替换为普通算术平均。新增方向差分解码器与冻结DINOv3辅助关系监督，采样位置不变。
+
+- [实验配置、权重准备与启动步骤](README_DIRECTIONAL.md)
+- 原训练入口：`configs/001_ciaosr_rdn_div2k_patch_kv.py`，数据路径保留在该文件。
+- 仅差分：`configs/002_directional_detail.py`。
+- 差分＋DINOv3：`configs/003_directional_dinov3.py`。
+- 同预算普通平均对照：`configs/004_baseline_finetune.py`。
+
+DINOv3权重放在 `external_weights/dinov3/`，不上传到Git。下面保留原项目说明。
+
+---
+
 # CiaoSR: Continuous Implicit Attention-in-Attention Network for Arbitrary-Scale Image Super-Resolution (CVPR 2023)
 
 [Jiezhang Cao](https://www.jiezhangcao.com/), [Qin Wang](https://www.qin.ee/), [Yongqin Xian](https://xianyongqin.github.io/), [Yawei Li](https://ofsoundof.github.io/), [Bingbing Ni](), [Zhiming Pi](), [Kai Zhang](https://cszn.github.io/), [Yulun Zhang](http://yulunzhang.com/), [Radu Timofte](https://www.informatik.uni-wuerzburg.de/computervision/home/), [Luc Van Gool](https://scholar.google.com/citations?user=TwMib_QAAAAJ&hl=en)

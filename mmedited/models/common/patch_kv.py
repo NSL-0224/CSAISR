@@ -4,7 +4,7 @@ Retains upstream CrossScaleAttention projections, patch extraction, dynamic
 convolution / transposed convolution, downsampling, cropping and /6 scaling.
 Borrowed ideas: SAT-style density/separation center selection; proportional
 attention's log-multiplicity correction. These are NOT claimed as new.
-Main method: joint K/V/spatial grouping, DCR, paired similarity-weighted means, and unified
+Main method: joint K/V/spatial grouping, DCR, paired means, and unified
 matching/reconstruction. Optional Gaussian spatial reading is disabled by
 default and is not part of the main embodiment. No PSNR claim is made.
 """
@@ -21,21 +21,18 @@ from mmedited.models.common.arch_csnln import (
 
 class PatchKVAttention(CrossScaleAttention):
     def __init__(self, channel=64, scale=(2,), keep_ratio=0.5, geometry=False,
-                 reject_thresholds=(0.5, 0.5), aggregation_temperature=1.0):
+                 reject_thresholds=(0.5, 0.5)):
         scales = list(scale)
         if not scales or any(s not in (2, 3, 4) for s in scales):
             raise ValueError('PatchKVAttention supports original scales 2, 3, 4')
         if not math.isfinite(keep_ratio) or not 0 < keep_ratio <= 1:
             raise ValueError('keep_ratio must be finite and in (0, 1]')
-        if not math.isfinite(aggregation_temperature) or aggregation_temperature <= 0:
-            raise ValueError('aggregation_temperature must be finite and positive')
         if reject_thresholds is not None:
             if len(reject_thresholds) != 2 or any(not math.isfinite(t) or t < 0 for t in reject_thresholds):
                 raise ValueError('reject_thresholds must be two finite nonnegative distances or None')
             reject_thresholds = tuple(float(t) for t in reject_thresholds)
         super().__init__(channel=channel, scale=scales)
         self.keep_ratio = keep_ratio
-        self.aggregation_temperature = float(aggregation_temperature)
         self.geometry = bool(geometry)
         self.region_size = 4
         # None reproduces v1 fixed-budget merging. With thresholds, reject
@@ -57,11 +54,7 @@ class PatchKVAttention(CrossScaleAttention):
         return torch.stack((yy[:, None].expand(h, w), xx[None, :].expand(h, w)), -1)
 
     def _merge_region(self, key, value, position, scale):
-        """Hard grouping/DCR, then SAT-style cosine-weighted paired means.
-
-        Similarity is measured on K against its original assigned center.
-        This adapts SAT's averaging rule, not its full token pipeline or FNR.
-        """
+        """Batched hard assignments; differentiable means of paired K/V."""
         b, n, _ = key.shape
         count = max(1, math.ceil(n*self.keep_ratio))
         if count == n:
@@ -94,8 +87,8 @@ class PatchKVAttention(CrossScaleAttention):
             to_centers = distance.gather(2, centers[:, None].expand(b, n, count))
             assignment = to_centers.argmin(-1)
             assignment.scatter_(1, centers, torch.arange(count, device=key.device)[None].expand(b, -1))
-            chosen = centers.gather(1, assignment)
             if self.reject_thresholds is not None:
+                chosen = centers.gather(1, assignment)
                 chosen_k = kd.gather(1, chosen[..., None].expand_as(kd))
                 chosen_v = vd.gather(1, chosen[..., None].expand_as(vd))
                 # Direct differences avoid Gram-matrix cancellation at zero
@@ -110,8 +103,6 @@ class PatchKVAttention(CrossScaleAttention):
                 # absorbing other candidates or triggering another assignment.
                 singleton = count+reject.long().cumsum(-1)-1
                 assignment = torch.where(reject, singleton, assignment)
-                # A rejected candidate becomes its own reference center.
-                chosen = torch.where(reject, order[None].expand(b, -1), chosen)
                 count += int(reject.sum(-1).max().item())
 
         def summed(x):
@@ -121,24 +112,14 @@ class PatchKVAttention(CrossScaleAttention):
         mass = summed(key.new_ones(b, n, 1))
         # Different images may have different numbers of singleton groups.
         # Zero-mass slots pad the batch only and must never enter attention.
-        center_key = key.gather(1, chosen[..., None].expand_as(key))
-        similarity = F.cosine_similarity(key, center_key, dim=-1, eps=1e-8)
-        # Subtract each group's maximum before exp for numerical stability.
-        # Regions contain at most 16 candidates; padded groups are empty.
-        membership = assignment[:, None, :] == torch.arange(count, device=key.device)[None, :, None]
-        group_max = similarity.detach()[:, None, :].expand(b, count, n).masked_fill(
-            ~membership, float('-inf')).amax(-1)
-        shifted = similarity - group_max.gather(1, assignment)
-        weights = (shifted / self.aggregation_temperature).exp().unsqueeze(-1)
-        denominator = summed(weights).clamp_min(1e-8)
-        key_mean = summed(key * weights)/denominator
-        value_mean = summed(value * weights)/denominator
-        mean_position = summed(position * weights)/denominator
+        denominator = mass.clamp_min(1)
+        key_mean = summed(key)/denominator
+        value_mean = summed(value)/denominator
+        mean_position = summed(position)/denominator
         centered = position-mean_position.gather(1, assignment[..., None].expand(b, n, 2))
-        variance = summed(centered.square() * weights)/denominator
-        # No FNR or re-normalization. K/V share weights. Mass remains the
-        # integer member count for log-multiplicity correction, not weight sum.
-        # For unequal keys that correction is approximate, not exact attention.
+        variance = summed(centered.square())/denominator
+        # Do not renormalize averaged keys or restore norms: averaging the
+        # already-normalized original keys preserves the logit-mean meaning.
         return key_mean, value_mean, mean_position, variance, mass.squeeze(-1)
 
     def _aggregate_bank(self, key, value, h, w, scale):

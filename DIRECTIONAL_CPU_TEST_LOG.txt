@@ -1,0 +1,9 @@
+PASS stencil order, zero-sum kernels, constant cancellation, horizontal response
+PASS relation loss: different channel dimensions, student gradients, teacher detached
+PASS actual RDN+KVCA decoder: disabled/zero-init exact baseline, odd/even image sizes
+PASS first-step gradients to detail output and teacher-guided structure branch
+PASS finite optimizer steps, learned branch effect, chunked/direct parity
+PASS finite integer/noninteger/out-of-range cell queries (not dataset PSNR)
+PASS strict warm-start expansion and rejection of missing baseline parameters
+PASS full RDN 64x16: 48x48 LR, 256 x4 queries, directional parameters: 22467
+All CPU math audits passed; runner/CUDA/DDP/real teacher/PSNR are NOT validated.

@@ -1,4 +1,4 @@
-exp_name = '001_csa_isr_rdn_div2k_kvca_dcr_v3_sat_weighted'
+exp_name = '001_csa_isr_rdn_div2k_kvca_dcr_v3_mean'
 scale_min, scale_max = 1, 4
 val_scale = 4   #TODO
 data_type = 'Urban100'  #TODO {Set5, Set14, BSDS100, Urban100, Manga109}
@@ -43,8 +43,7 @@ model = dict(
         # Thresholds are UNCALIBRATED starting values, not tuned optima.
         # Unit-norm K: D_K <= .5 corresponds to cosine >= .75.
         patch_kv=dict(keep_ratio=0.5, geometry=False,
-                      reject_thresholds=(0.5, 0.5),
-                      aggregation_temperature=1.0),
+                      reject_thresholds=(0.5, 0.5)),
         ),
     rgb_mean=(0.4488, 0.4371, 0.4040),
     rgb_std=(1., 1., 1.),
